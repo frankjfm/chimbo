@@ -1,0 +1,188 @@
+-- ============================================
+-- Chimbo Database Full Schema (with triggers)
+-- ============================================
+
+-- Enable UUID generation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ============================================
+-- ENUM TYPES
+-- ============================================
+CREATE TYPE public.audit_action AS ENUM ('deal_lock','deal_sold','negotiation','extension');
+CREATE TYPE public.deal_status AS ENUM ('pending','locked','sold','expired');
+CREATE TYPE public.negotiation_status AS ENUM ('pending','countered','accepted','rejected');
+CREATE TYPE public.product_status AS ENUM ('active','paused','archived');
+CREATE TYPE public.subscription_plan AS ENUM ('basic','standard','premium');
+CREATE TYPE public.subscription_status AS ENUM ('active','expired','paused');
+CREATE TYPE public.user_role AS ENUM ('agent','vendor','admin');
+
+-- ============================================
+-- TABLES
+-- ============================================
+
+-- Users table
+CREATE TABLE public.users (
+    user_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name varchar(255) NOT NULL,
+    phone varchar(50) UNIQUE,
+    email varchar(255),
+    role user_role NOT NULL,
+    subscription_status boolean DEFAULT FALSE,
+    subscription_plan subscription_plan,
+    password_hash varchar(255) NOT NULL,
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Products table
+CREATE TABLE public.products (
+    product_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    vendor_id uuid NOT NULL,
+    name varchar(255) NOT NULL,
+    category varchar(100),
+    description text,
+    base_price numeric(10,2) NOT NULL,
+    stock_quantity integer DEFAULT 0 CHECK (stock_quantity >= 0),
+    status product_status DEFAULT 'active',
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vendor FOREIGN KEY (vendor_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- Deals table
+CREATE TABLE public.deals (
+    deal_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id uuid NOT NULL,
+    agent_id uuid NOT NULL,
+    vendor_id uuid NOT NULL,
+    quantity integer NOT NULL CHECK (quantity > 0),
+    price numeric(10,2) NOT NULL CHECK (price > 0),
+    status deal_status DEFAULT 'pending',
+    locked_at timestamp,
+    expiry_at timestamp,
+    extension_count integer DEFAULT 0,
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_product FOREIGN KEY (product_id) REFERENCES public.products(product_id) ON DELETE CASCADE,
+    CONSTRAINT fk_agent FOREIGN KEY (agent_id) REFERENCES public.users(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_vendor FOREIGN KEY (vendor_id) REFERENCES public.users(user_id) ON DELETE CASCADE,
+    CONSTRAINT unique_agent_product_locked UNIQUE (agent_id, product_id, status)
+);
+
+-- Negotiations table
+CREATE TABLE public.negotiations (
+    negotiation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id uuid,
+    product_id uuid NOT NULL,
+    agent_id uuid NOT NULL,
+    vendor_id uuid NOT NULL,
+    proposed_price numeric(10,2) NOT NULL,
+    quantity integer NOT NULL CHECK (quantity > 0),
+    status negotiation_status DEFAULT 'pending',
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_deal FOREIGN KEY (deal_id) REFERENCES public.deals(deal_id) ON DELETE CASCADE,
+    CONSTRAINT fk_product FOREIGN KEY (product_id) REFERENCES public.products(product_id) ON DELETE CASCADE,
+    CONSTRAINT fk_agent FOREIGN KEY (agent_id) REFERENCES public.users(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_vendor FOREIGN KEY (vendor_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- Subscriptions table
+CREATE TABLE public.subscriptions (
+    subscription_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    plan_type subscription_plan NOT NULL,
+    start_date date NOT NULL,
+    end_date date NOT NULL,
+    auto_renew boolean DEFAULT FALSE,
+    status subscription_status DEFAULT 'active',
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_sub FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- Agent Performance table
+CREATE TABLE public.agent_performance (
+    agent_id uuid PRIMARY KEY,
+    deals_closed integer DEFAULT 0,
+    deals_dropped integer DEFAULT 0,
+    success_rate numeric(5,2) DEFAULT 0.0,
+    avg_sell_time numeric(10,2) DEFAULT 0.0,
+    last_updated timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_agent_perf FOREIGN KEY (agent_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- Vendor Performance table
+CREATE TABLE public.vendor_performance (
+    performance_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    vendor_id uuid NOT NULL,
+    deals_completed integer DEFAULT 0,
+    response_rate numeric(5,2) DEFAULT 0.0,
+    rating numeric(2,1) DEFAULT 0.0,
+    deals_accepted integer DEFAULT 0,
+    deals_confirmed integer DEFAULT 0,
+    avg_confirmation_time numeric(10,2) DEFAULT 0.0,
+    last_updated timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vendor_perf FOREIGN KEY (vendor_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- Audit Logs table
+CREATE TABLE public.audit_logs (
+    log_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    action_type audit_action NOT NULL,
+    target_id uuid,
+    details json,
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_log FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- Notifications table
+CREATE TABLE public.notifications (
+    notification_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    message text NOT NULL,
+    read_status boolean DEFAULT FALSE,
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_notif FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE
+);
+
+-- ============================================
+-- INDEXES
+-- ============================================
+CREATE INDEX idx_deals_product ON public.deals(product_id);
+CREATE INDEX idx_deals_agent ON public.deals(agent_id);
+CREATE INDEX idx_deals_vendor ON public.deals(vendor_id);
+CREATE INDEX idx_deals_status ON public.deals(status);
+CREATE INDEX idx_deals_expiry ON public.deals(expiry_at);
+CREATE INDEX idx_negotiations_product ON public.negotiations(product_id);
+CREATE INDEX idx_negotiations_agent_status ON public.negotiations(agent_id, status);
+CREATE INDEX idx_negotiations_vendor_status ON public.negotiations(vendor_id, status);
+CREATE INDEX idx_notifications_user ON public.notifications(user_id);
+CREATE INDEX idx_subscriptions_user ON public.subscriptions(user_id);
+CREATE INDEX idx_agent_perf_agent ON public.agent_performance(agent_id);
+CREATE INDEX idx_vendor_perf_vendor ON public.vendor_performance(vendor_id);
+
+-- ============================================
+-- TRIGGERS
+-- ============================================
+-- Function to set deal expiry 24h after lock
+CREATE OR REPLACE FUNCTION public.set_deal_expiry()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'locked' AND NEW.locked_at IS NOT NULL THEN
+        NEW.expiry_at := NEW.locked_at + INTERVAL '24 hours';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger on deals table
+CREATE TRIGGER trg_set_expiry
+BEFORE INSERT OR UPDATE ON public.deals
+FOR EACH ROW
+EXECUTE FUNCTION public.set_deal_expiry();
+
+-- ============================================
+-- END OF SCHEMA
+-- ============================================

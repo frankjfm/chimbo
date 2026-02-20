@@ -1,5 +1,7 @@
 services:
-  # PostgreSQL
+  # -----------------------
+  # PostgreSQL Database
+  # -----------------------
   postgres:
     image: postgres:16
     container_name: postgres_db
@@ -11,9 +13,11 @@ services:
       - "${POSTGRES_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./backend/init-scripts:/docker-entrypoint-initdb.d
+      - ./init-scripts:/docker-entrypoint-initdb.d
 
-  # Redis
+  # -----------------------
+  # Redis Cache
+  # -----------------------
   redis:
     image: redis:8-alpine
     container_name: redis_cache
@@ -22,7 +26,9 @@ services:
     volumes:
       - redisdata:/data
 
+  # -----------------------
   # pgAdmin
+  # -----------------------
   pgadmin:
     image: dpage/pgadmin4
     container_name: chimbo_pgadmin
@@ -34,7 +40,9 @@ services:
     depends_on:
       - postgres
 
-  # NestJS backend
+  # -----------------------
+  # NestJS Backend
+  # -----------------------
   backend:
     build: ./backend
     container_name: chimbo_backend
@@ -42,7 +50,7 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
-      - ../.env:/app/.env
+      - ../.env:/app/.env   # map root .env into container
     ports:
       - "3000:3000"
     depends_on:

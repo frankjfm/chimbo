@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: chimbo_admin
+      POSTGRES_PASSWORD: Ch1mb0!Secure2026
+      POSTGRES_DB: chimbo_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:8-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: chimbo_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@chimbo.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "8820:80"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
+  redisdata:

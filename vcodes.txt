@@ -1,0 +1,2 @@
+to database: docker exec -it postgres_db psql -U chimbo_admin -d chimbo_db
+docker logs chimbo_backend
